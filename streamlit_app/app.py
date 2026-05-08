@@ -229,4 +229,4 @@ if radius_center.strip():
         parts = radius_center.strip().split(',')
         rc_lat, rc_lon = float(parts[0]), float(parts[1])
         radius_center_coords = (rc_lat, rc_lon)
-        filt = filt[filt.apply(lambda r: get_dist_km(rc
+        mask = filt.apply(lambda r: get_dist_km(rc_lat,
