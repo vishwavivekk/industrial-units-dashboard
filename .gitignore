@@ -2,4 +2,3 @@
 units_enriched.csv
 __pycache__/
 *.pyc
-.streamlit/
