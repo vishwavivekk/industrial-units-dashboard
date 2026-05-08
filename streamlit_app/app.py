@@ -183,7 +183,8 @@ with st.sidebar:
     sel_district = st.selectbox("District", districts)
 
     if sel_state != 'All States' and sel_district != 'All Districts':
-        pcs_avail = sorted(pc_df[(pc_df['State name']==sel_state)&(pc_df['District Name']==sel_district)]['PC name'].dropna().unique())
+        _mask = (pc_df['State name']==sel_state) & (pc_df['District Name']==sel_district)
+        pcs_avail = sorted(pc_df[_mask]['PC name'].dropna().unique())
     elif sel_state != 'All States':
         pcs_avail = sorted(pc_df[pc_df['State name']==sel_state]['PC name'].dropna().unique())
     else:
@@ -227,6 +228,7 @@ radius_center_coords = None
 if radius_center.strip():
     try:
         parts = radius_center.strip().split(',')
-        rc_lat, rc_lon = float(parts[0]), float(parts[1])
+        rc_lat  = float(parts[0])
+        rc_lon  = float(parts[1])
         radius_center_coords = (rc_lat, rc_lon)
-        mask = filt.apply(lambda r: get_dist_km(rc_lat,
+        def _in_radiu
