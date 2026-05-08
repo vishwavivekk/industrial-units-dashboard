@@ -17,41 +17,23 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif !important; }
-
 .metric-card {
     background: #111827; border: 1px solid #1e2d4a;
     border-radius: 10px; padding: 14px 16px; text-align: center;
 }
-.metric-val {
-    font-size: 26px; font-weight: 700; color: #00d4ff;
-    font-family: 'JetBrains Mono', monospace; line-height: 1.1;
-}
+.metric-val { font-size: 26px; font-weight: 700; color: #00d4ff; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
 .metric-lbl { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
 .metric-sub { font-size: 10px; color: #22d3ee; margin-top: 2px; }
-.section-title {
-    font-size: 11px; color: #64748b; text-transform: uppercase;
-    letter-spacing: 1.5px; margin-bottom: 7px; padding-bottom: 5px;
-    border-bottom: 1px solid #1e2d4a;
-}
-.pc-card {
-    background: #0d1f35; border: 1px solid #00ff88;
-    border-radius: 8px; padding: 11px 13px; margin: 7px 0;
-}
-.rank-card {
-    background: #111827; border: 1px solid #1e2d4a;
-    border-radius: 7px; padding: 9px 11px; margin-bottom: 6px;
-}
+.section-title { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 7px; padding-bottom: 5px; border-bottom: 1px solid #1e2d4a; }
+.pc-card { background: #0d1f35; border: 1px solid #00ff88; border-radius: 8px; padding: 11px 13px; margin: 7px 0; }
+.rank-card { background: #111827; border: 1px solid #1e2d4a; border-radius: 7px; padding: 9px 11px; margin-bottom: 6px; }
 .rank-card:hover { border-color: #00d4ff; }
 .bar-wrap { background: #1a2235; border-radius: 2px; height: 5px; margin-top: 2px; }
-.badge {
-    display: inline-block; padding: 1px 8px; border-radius: 20px;
-    font-size: 10px; font-weight: 600; margin-right: 4px;
-}
 div[data-testid="stTabs"] button { font-size: 13px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Paths ──────────────────────────────────────────────────────────────────
+# ─── Paths ───────────────────────────────────────────────────────────────────
 APP_DIR  = Path(__file__).resolve().parent
 REPO_DIR = APP_DIR.parent
 
@@ -98,18 +80,18 @@ def get_dist_km(lat1, lon1, lat2, lon2):
 # ─── Data Loading ─────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner="Loading industrial data...")
 def load_data():
-    # ── units_enriched: unit-level lat/lon data ───
+    # units_enriched: unit-level lat/lon data
     eu = pd.read_csv(REPO_DIR / 'units_enriched.csv')
     eu.rename(columns={' District Name': 'District Name'}, inplace=True)
-    for col in ['State name','District Name','PC name','place','Winner Name','Winner Party']:
-        eu[col] = eu[col].astype(str).str.strip()
+    for c in ['State name','District Name','PC name','place','Winner Name','Winner Party']:
+        eu[c] = eu[c].astype(str).str.strip()
     eu['latitude']  = pd.to_numeric(eu['latitude'],  errors='coerce')
     eu['longitude'] = pd.to_numeric(eu['longitude'], errors='coerce')
     eu['employees'] = pd.to_numeric(eu['employees'], errors='coerce').fillna(0).astype(int)
     eu = eu.dropna(subset=['latitude','longitude'])
     eu = eu[(eu['latitude'].between(6,38)) & (eu['longitude'].between(68,98))]
 
-    # ── Annexure: district-level industry breakdown ───
+    # Annexure: district-level industry breakdown
     df_raw = pd.read_csv(REPO_DIR / 'Annexure_with_3digit_Sheet1.csv')
     sub_hdr = df_raw.iloc[0]
     df_ann  = df_raw.iloc[1:].reset_index(drop=True).copy()
@@ -140,7 +122,7 @@ def load_data():
                 ind[base] = int(t)
         annex_map[dist_key] = {'industries': ind, 'total_annex': sum(ind.values())}
 
-    # ── PC-level aggregation ───
+    # PC-level aggregation
     pc_grp = eu.groupby(['State name','District Name','PC name','Winner Name','Winner Party']).agg(
         units=('unit_id','count'),
         total_employees=('employees','sum'),
@@ -150,7 +132,6 @@ def load_data():
     pc_coords = eu.groupby('PC name').agg(lat=('latitude','mean'), lon=('longitude','mean')).reset_index()
     pc_grp = pc_grp.merge(pc_coords, on='PC name', how='left')
 
-    # Attach industry data from annexure
     def get_industries(row):
         k = row['District Name'].upper().strip()
         return annex_map.get(k, {}).get('industries', {})
@@ -158,8 +139,8 @@ def load_data():
     pc_grp['industries'] = pc_grp.apply(get_industries, axis=1)
     pc_grp = pc_grp.dropna(subset=['lat','lon'])
 
-    # ── Lok Sabha for margin data ───
-    df_lok = pd.read_excel(REPO_DIR / 'Lok_Sabha_Elections_Winners_2024.xlsx')
+    # Lok Sabha margin data
+    df_lok = pd.read_excel(REPO_DIR / 'Lok_Sabha_Elections_Winners_2024.xlsx', engine='openpyxl')
     lok_map = {}
     for _, r in df_lok.iterrows():
         try:
@@ -171,14 +152,15 @@ def load_data():
             'runner_up': str(r['Runner-up Canddiate']),
             'runner_party': str(r['Runner-up Party']),
         }
+
     def get_margin(pc_name):
         d = lok_map.get(str(pc_name).upper().strip(), {})
-        return d.get('margin', 0), d.get('runner_up','N/A'), d.get('runner_party','N/A')
+        return d.get('margin', 0), d.get('runner_up', 'N/A'), d.get('runner_party', 'N/A')
 
     pc_grp['margin'], pc_grp['runner_up'], pc_grp['runner_party'] = zip(*pc_grp['PC name'].map(get_margin))
 
     all_industries = sorted(set(k for ind in pc_grp['industries'] for k in ind))
-    ind_color_map = {ind: IND_COLORS[i % len(IND_COLORS)] for i, ind in enumerate(all_industries)}
+    ind_color_map  = {ind: IND_COLORS[i % len(IND_COLORS)] for i, ind in enumerate(all_industries)}
 
     return pc_grp, eu, all_industries, ind_color_map
 
@@ -219,20 +201,18 @@ with st.sidebar:
 
     st.divider()
     st.markdown("#### 🗺️ Map")
-    view_mode = st.radio("Color By", ['Units Count', 'Top Industry', 'Winning Party'])
+    view_mode    = st.radio("Color By", ['Units Count', 'Top Industry', 'Winning Party'])
     show_clusters = st.checkbox("Cluster markers", value=True)
 
     st.divider()
     st.markdown("#### 📍 Radius Search")
-    radius_km = st.slider("Radius (km)", 50, 500, 150, 25)
+    radius_km     = st.slider("Radius (km)", 50, 500, 150, 25)
     radius_center = st.text_input("Center lat,lon", placeholder="28.6, 77.2")
 
     st.divider()
-    total_u  = int(pc_df['units'].sum())
-    total_em = int(pc_df['total_employees'].sum())
-    st.caption(f"**{len(pc_df):,}** PC entries · **{total_u:,}** units · **{total_em:,}** employees")
+    st.caption(f"**{len(pc_df):,}** PC entries · **{int(pc_df['units'].sum()):,}** units · **{int(pc_df['total_employees'].sum()):,}** employees")
 
-# ─── Apply Filters ────────────────────────────────────────────────────────────
+# ─── Apply Filters ─────────────────────────────────────────────────────────────
 filt = pc_df.copy()
 if sel_state    != 'All States':    filt = filt[filt['State name']    == sel_state]
 if sel_district != 'All Districts': filt = filt[filt['District Name'] == sel_district]
@@ -243,4 +223,10 @@ if sel_industry != 'All Industries':
 if min_units > 0:
     filt = filt[filt['units'] >= min_units]
 
-radius_
+radius_center_coords = None
+if radius_center.strip():
+    try:
+        parts = radius_center.strip().split(',')
+        rc_lat, rc_lon = float(parts[0]), float(parts[1])
+        radius_center_coords = (rc_lat, rc_lon)
+        filt = filt[filt.apply(lambda r: get_dist_km(rc
