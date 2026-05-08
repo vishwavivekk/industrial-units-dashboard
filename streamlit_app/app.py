@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
 import json
-import os
+import math
 from pathlib import Path
 
-# ─── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Industrial Units Dashboard",
+    page_title="Manufacturing Cluster Intelligence",
     page_icon="🏭",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -14,206 +15,232 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-[data-testid="stAppViewContainer"] { background: #f7f6f2; }
-[data-testid="stSidebar"] { background: #f0ede8; }
-[data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 700; color: #01696f; }
-[data-testid="stMetricLabel"] { color: #6e6c66; font-size: 0.85rem; }
-.unit-card { background: white; border: 1px solid #e8e4de; border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; }
-.unit-title { font-weight: 700; font-size: 0.95rem; color: #28251d; margin: 0 0 6px; }
-.unit-meta { font-size: 0.8rem; color: #6e6c66; }
-.badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; margin-right: 6px; }
-.badge-pc { background: #d6eef0; color: #01696f; }
-.badge-party { background: #e0eef8; color: #006494; }
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif !important; }
+
+.metric-card {
+    background: #111827; border: 1px solid #1e2d4a;
+    border-radius: 10px; padding: 14px 16px; text-align: center;
+}
+.metric-val {
+    font-size: 26px; font-weight: 700; color: #00d4ff;
+    font-family: 'JetBrains Mono', monospace; line-height: 1.1;
+}
+.metric-lbl { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-top: 3px; }
+.metric-sub { font-size: 10px; color: #22d3ee; margin-top: 2px; }
+.section-title {
+    font-size: 11px; color: #64748b; text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 7px; padding-bottom: 5px;
+    border-bottom: 1px solid #1e2d4a;
+}
+.pc-card {
+    background: #0d1f35; border: 1px solid #00ff88;
+    border-radius: 8px; padding: 11px 13px; margin: 7px 0;
+}
+.rank-card {
+    background: #111827; border: 1px solid #1e2d4a;
+    border-radius: 7px; padding: 9px 11px; margin-bottom: 6px;
+}
+.rank-card:hover { border-color: #00d4ff; }
+.bar-wrap { background: #1a2235; border-radius: 2px; height: 5px; margin-top: 2px; }
+.badge {
+    display: inline-block; padding: 1px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 600; margin-right: 4px;
+}
+div[data-testid="stTabs"] button { font-size: 13px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Resolve data paths ───────────────────────────────────────────────────────
-# Works both locally and on Streamlit Cloud
-# On Streamlit Cloud: repo root is /mount/src/industrial-units-dashboard/
-# streamlit_app/app.py lives inside streamlit_app/, so parent = streamlit_app, parent.parent = repo root
+# ─── Paths ──────────────────────────────────────────────────────────────────
+APP_DIR  = Path(__file__).resolve().parent
+REPO_DIR = APP_DIR.parent
 
-APP_DIR  = Path(__file__).parent            # streamlit_app/
-REPO_DIR = APP_DIR.parent                   # repo root
+PARTY_COLORS = {
+    'Bharatiya Janata Party': '#ff9500',
+    'Indian National Congress': '#19a7ce',
+    'Samajwadi Party': '#e63946',
+    'All India Trinamool Congress': '#28a745',
+    'Trinamool Congress': '#28a745',
+    'Telugu Desam Party': '#ffd700',
+    'Telugu Desam': '#ffd700',
+    'Janata Dal  (United)': '#9b59b6',
+    'Dravida Munnetra Kazhagam': '#dc3545',
+    'YSR Congress Party': '#0d6efd',
+    'Yuvajana Sramika Rythu Congress Party': '#1a6ef5',
+    'Biju Janata Dal': '#20c997',
+    'Shiv Sena': '#fd7e14',
+    'Janasena Party': '#e91e63',
+    'Communist Party of India': '#cc0000',
+    'Nationalist Congress Party - Sharadchandra Pawar': '#5f2eea',
+    'Rashtriya Lok Dal': '#8bc34a',
+    'Independent': '#888888',
+}
 
-# Data files are at repo_root/processed/ and repo_root/
-UNITS_JSON  = REPO_DIR / "processed" / "units_data.json"
-GEOJSON     = REPO_DIR / "india_pc_2019.json"
-FILTER_JSON = REPO_DIR / "processed" / "filter_data.json"
+IND_COLORS = [
+    '#00d4ff','#00ff88','#ff6b35','#ffd700','#a855f7','#f472b6','#34d399',
+    '#fb923c','#60a5fa','#f87171','#4ade80','#facc15','#818cf8','#e879f9',
+    '#2dd4bf','#fb7185','#a3e635','#38bdf8','#c084fc','#fdba74','#67e8f9',
+    '#86efac','#fca5a5','#d8b4fe','#fde68a','#a7f3d0','#bfdbfe','#fecaca',
+    '#ddd6fe','#fed7aa','#6ee7b7','#93c5fd','#fda4af','#c4b5fd','#fcd34d',
+    '#6edff6','#a3e635','#f9a8d4',
+]
 
-# ─── Data loading ─────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner="Loading industrial units...")
-def load_units():
-    with open(UNITS_JSON) as f:
-        data = json.load(f)
-    df = pd.DataFrame(data)
-    df['State name']    = df['State name'].astype(str).str.strip()
-    df['District Name'] = df['District Name'].astype(str).str.strip()
-    df['PC name']       = df['PC name'].astype(str).str.strip()
-    df['place']         = df['place'].astype(str).str.strip()
-    df['latitude']      = pd.to_numeric(df['latitude'],  errors='coerce')
-    df['longitude']     = pd.to_numeric(df['longitude'], errors='coerce')
-    df['employees']     = pd.to_numeric(df['employees'], errors='coerce').fillna(0).astype(int)
-    df = df.dropna(subset=['latitude','longitude'])
-    df = df[(df['latitude'].between(-90,90)) & (df['longitude'].between(30,100))]
-    return df
+def get_party_color(party):
+    return PARTY_COLORS.get(str(party).strip(), '#64748b')
 
-@st.cache_data(show_spinner="Loading GeoJSON boundaries...")
-def load_geojson():
-    with open(GEOJSON) as f:
-        return json.load(f)
+def get_dist_km(lat1, lon1, lat2, lon2):
+    R = 6371
+    dLat = math.radians(lat2 - lat1)
+    dLon = math.radians(lon2 - lon1)
+    a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dLon/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
-@st.cache_data(show_spinner="Loading filters...")
-def load_filters():
-    with open(FILTER_JSON) as f:
-        return json.load(f)
+# ─── Data Loading ─────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner="Loading industrial data...")
+def load_data():
+    # ── units_enriched: unit-level lat/lon data ───
+    eu = pd.read_csv(REPO_DIR / 'units_enriched.csv')
+    eu.rename(columns={' District Name': 'District Name'}, inplace=True)
+    for col in ['State name','District Name','PC name','place','Winner Name','Winner Party']:
+        eu[col] = eu[col].astype(str).str.strip()
+    eu['latitude']  = pd.to_numeric(eu['latitude'],  errors='coerce')
+    eu['longitude'] = pd.to_numeric(eu['longitude'], errors='coerce')
+    eu['employees'] = pd.to_numeric(eu['employees'], errors='coerce').fillna(0).astype(int)
+    eu = eu.dropna(subset=['latitude','longitude'])
+    eu = eu[(eu['latitude'].between(6,38)) & (eu['longitude'].between(68,98))]
 
-df      = load_units()
-geojson = load_geojson()
-filters = load_filters()
+    # ── Annexure: district-level industry breakdown ───
+    df_raw = pd.read_csv(REPO_DIR / 'Annexure_with_3digit_Sheet1.csv')
+    sub_hdr = df_raw.iloc[0]
+    df_ann  = df_raw.iloc[1:].reset_index(drop=True).copy()
+    df_ann.columns = df_raw.columns
+    df_ann['Latitude']  = pd.to_numeric(df_ann['Latitude'],  errors='coerce')
+    df_ann['Longitude'] = pd.to_numeric(df_ann['Longitude'], errors='coerce')
 
-# ─── Header ───────────────────────────────────────────────────────────────────
-st.markdown("# 🏭 Industrial Units Dashboard")
-st.markdown("Map industrial units across Indian parliamentary constituency boundaries")
-st.divider()
+    industry_cols = [c for c in df_ann.columns if c not in ['State','District','Latitude','Longitude']]
+    base_industries = {}
+    for col in industry_cols:
+        base = col.split('.')[0].strip()
+        base_industries.setdefault(base, []).append(col)
 
-# ─── Sidebar filters ─────────────────────────────────────────────────────────
+    def safe_num(v):
+        try:
+            f = float(str(v).replace('-','0').replace(',',''))
+            return 0 if math.isnan(f) else f
+        except:
+            return 0
+
+    annex_map = {}
+    for _, row in df_ann.iterrows():
+        dist_key = str(row['District']).strip().upper()
+        ind = {}
+        for base, cols in base_industries.items():
+            t = sum(safe_num(row[c]) for c in cols)
+            if t > 0:
+                ind[base] = int(t)
+        annex_map[dist_key] = {'industries': ind, 'total_annex': sum(ind.values())}
+
+    # ── PC-level aggregation ───
+    pc_grp = eu.groupby(['State name','District Name','PC name','Winner Name','Winner Party']).agg(
+        units=('unit_id','count'),
+        total_employees=('employees','sum'),
+        places=('place', lambda x: x.nunique())
+    ).reset_index()
+
+    pc_coords = eu.groupby('PC name').agg(lat=('latitude','mean'), lon=('longitude','mean')).reset_index()
+    pc_grp = pc_grp.merge(pc_coords, on='PC name', how='left')
+
+    # Attach industry data from annexure
+    def get_industries(row):
+        k = row['District Name'].upper().strip()
+        return annex_map.get(k, {}).get('industries', {})
+
+    pc_grp['industries'] = pc_grp.apply(get_industries, axis=1)
+    pc_grp = pc_grp.dropna(subset=['lat','lon'])
+
+    # ── Lok Sabha for margin data ───
+    df_lok = pd.read_excel(REPO_DIR / 'Lok_Sabha_Elections_Winners_2024.xlsx')
+    lok_map = {}
+    for _, r in df_lok.iterrows():
+        try:
+            margin = int(r['Margin Votes'])
+        except:
+            margin = 0
+        lok_map[str(r['PC Name']).strip().upper()] = {
+            'margin': margin,
+            'runner_up': str(r['Runner-up Canddiate']),
+            'runner_party': str(r['Runner-up Party']),
+        }
+    def get_margin(pc_name):
+        d = lok_map.get(str(pc_name).upper().strip(), {})
+        return d.get('margin', 0), d.get('runner_up','N/A'), d.get('runner_party','N/A')
+
+    pc_grp['margin'], pc_grp['runner_up'], pc_grp['runner_party'] = zip(*pc_grp['PC name'].map(get_margin))
+
+    all_industries = sorted(set(k for ind in pc_grp['industries'] for k in ind))
+    ind_color_map = {ind: IND_COLORS[i % len(IND_COLORS)] for i, ind in enumerate(all_industries)}
+
+    return pc_grp, eu, all_industries, ind_color_map
+
+pc_df, eu, all_industries, ind_color_map = load_data()
+
+# ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🔎 Filters")
+    st.markdown("## 🏭 MCI Dashboard")
+    st.markdown("<span style='color:#64748b;font-size:12px'>Manufacturing Cluster Intelligence · Lok Sabha 2024</span>", unsafe_allow_html=True)
+    st.divider()
 
-    states = sorted(filters.keys())
-    selected_state = st.selectbox("State", ["All states"] + states)
+    st.markdown("#### 🔍 Filters")
+    states = ['All States'] + sorted(pc_df['State name'].dropna().unique())
+    sel_state = st.selectbox("State", states)
 
-    if selected_state != "All states":
-        districts = sorted(filters[selected_state].keys())
+    if sel_state != 'All States':
+        districts = ['All Districts'] + sorted(pc_df[pc_df['State name']==sel_state]['District Name'].dropna().unique())
     else:
-        districts = sorted(df['District Name'].dropna().unique().tolist())
-    selected_district = st.selectbox("District", ["All districts"] + districts)
+        districts = ['All Districts'] + sorted(pc_df['District Name'].dropna().unique())
+    sel_district = st.selectbox("District", districts)
 
-    if selected_state != "All states" and selected_district != "All districts":
-        pcs = sorted([p['name'] for p in filters[selected_state].get(selected_district, [])])
-    elif selected_state != "All states":
-        pcs = sorted(set(p['name'] for d in filters[selected_state].values() for p in d))
+    if sel_state != 'All States' and sel_district != 'All Districts':
+        pcs_avail = sorted(pc_df[(pc_df['State name']==sel_state)&(pc_df['District Name']==sel_district)]['PC name'].dropna().unique())
+    elif sel_state != 'All States':
+        pcs_avail = sorted(pc_df[pc_df['State name']==sel_state]['PC name'].dropna().unique())
     else:
-        pcs = sorted(df['PC name'].dropna().unique().tolist())
-    selected_pc = st.selectbox("Principal Constituency", ["All PCs"] + pcs)
+        pcs_avail = sorted(pc_df['PC name'].dropna().unique())
+    sel_pc = st.selectbox("Parliamentary Constituency", ['All PCs'] + pcs_avail)
 
-    st.markdown("---")
-    search_query = st.text_input("🔍 Search place / unit", placeholder="Type to search...")
-    st.markdown("---")
-    max_markers = st.slider("Max map markers", 100, 5000, 2000, 100,
-        help="Limit markers for map performance")
-    st.markdown("---")
-    show_boundary = st.checkbox("Show PC boundary", value=True)
-    show_markers  = st.checkbox("Show unit markers", value=True)
+    st.divider()
+    ind_list = ['All Industries'] + all_industries
+    sel_industry = st.selectbox("Industry Sector", ind_list)
 
-# ─── Filter logic ─────────────────────────────────────────────────────────────
-filtered = df.copy()
-if selected_state    != "All states":    filtered = filtered[filtered['State name']    == selected_state]
-if selected_district != "All districts": filtered = filtered[filtered['District Name'] == selected_district]
-if selected_pc       != "All PCs":       filtered = filtered[filtered['PC name']       == selected_pc]
-if search_query:
-    q = search_query.lower()
-    filtered = filtered[
-        filtered['place'].str.lower().str.contains(q, na=False) |
-        filtered['PC name'].str.lower().str.contains(q, na=False) |
-        filtered['District Name'].str.lower().str.contains(q, na=False)
-    ]
+    all_parties = ['All Parties'] + sorted(pc_df['Winner Party'].dropna().unique())
+    sel_party = st.selectbox("Winning Party", all_parties)
 
-# ─── KPI row ──────────────────────────────────────────────────────────────────
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("🏭 Units",            f"{len(filtered):,}")
-c2.metric("🏛 States",           filtered['State name'].nunique())
-c3.metric("📍 Districts",        filtered['District Name'].nunique())
-c4.metric("🗳 PCs",              filtered['PC name'].nunique())
-c5.metric("👷 Total Employees",  f"{filtered['employees'].sum():,}")
+    min_units = st.slider("Min. Units in PC", 0, int(pc_df['units'].max()), 0, step=5)
 
-st.divider()
+    st.divider()
+    st.markdown("#### 🗺️ Map")
+    view_mode = st.radio("Color By", ['Units Count', 'Top Industry', 'Winning Party'])
+    show_clusters = st.checkbox("Cluster markers", value=True)
 
-# ─── Map + List layout ────────────────────────────────────────────────────────
-map_col, list_col = st.columns([1.4, 0.6])
+    st.divider()
+    st.markdown("#### 📍 Radius Search")
+    radius_km = st.slider("Radius (km)", 50, 500, 150, 25)
+    radius_center = st.text_input("Center lat,lon", placeholder="28.6, 77.2")
 
-with map_col:
-    st.markdown("### 🗺 Map View")
-    try:
-        import folium
-        from streamlit_folium import st_folium
+    st.divider()
+    total_u  = int(pc_df['units'].sum())
+    total_em = int(pc_df['total_employees'].sum())
+    st.caption(f"**{len(pc_df):,}** PC entries · **{total_u:,}** units · **{total_em:,}** employees")
 
-        pc_feat = None
-        if selected_pc != "All PCs" and geojson:
-            pc_feat = next(
-                (f for f in geojson['features']
-                 if f['properties'].get('pc_name','').strip().lower() == selected_pc.lower()
-                 and (selected_state == "All states" or
-                      f['properties'].get('st_name','').strip().lower() == selected_state.lower())),
-                None
-            )
+# ─── Apply Filters ────────────────────────────────────────────────────────────
+filt = pc_df.copy()
+if sel_state    != 'All States':    filt = filt[filt['State name']    == sel_state]
+if sel_district != 'All Districts': filt = filt[filt['District Name'] == sel_district]
+if sel_pc       != 'All PCs':       filt = filt[filt['PC name']       == sel_pc]
+if sel_party    != 'All Parties':   filt = filt[filt['Winner Party']  == sel_party]
+if sel_industry != 'All Industries':
+    filt = filt[filt['industries'].apply(lambda x: isinstance(x, dict) and x.get(sel_industry, 0) > 0)]
+if min_units > 0:
+    filt = filt[filt['units'] >= min_units]
 
-        center_lat = filtered['latitude'].mean()  if len(filtered) > 0 else 22.8
-        center_lon = filtered['longitude'].mean() if len(filtered) > 0 else 79.5
-        zoom = 5 if selected_state == "All states" else (7 if selected_district == "All districts" else (9 if selected_pc == "All PCs" else 10))
-
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom,
-                       tiles='CartoDB positron', control_scale=True)
-
-        if show_boundary and pc_feat:
-            folium.GeoJson(
-                pc_feat,
-                style_function=lambda x: {'color':'#01696f','weight':3,'fillColor':'#01696f','fillOpacity':0.07},
-                tooltip=f"{pc_feat['properties']['pc_name']} | {pc_feat['properties']['st_name']}"
-            ).add_to(m)
-
-        if show_markers and len(filtered) > 0:
-            from folium.plugins import MarkerCluster
-            mc = MarkerCluster(options={'maxClusterRadius':40,'disableClusteringAtZoom':12}).add_to(m)
-            for _, row in filtered.head(max_markers).iterrows():
-                folium.CircleMarker(
-                    location=[row['latitude'], row['longitude']],
-                    radius=5, color='#d9485f', fill=True,
-                    fill_color='#d9485f', fill_opacity=0.75,
-                    tooltip=f"{row['place']} | {row['PC name']} | Emp: {row['employees']}",
-                    popup=folium.Popup(
-                        f"<b>{row['place']}</b><br>PC: {row['PC name']}<br>"
-                        f"District: {row['District Name']}<br>State: {row['State name']}<br>"
-                        f"Employees: {row['employees']}<br>"
-                        f"Winner: {row.get('Winner Name','NA')} ({row.get('Winner Party','NA')})",
-                        max_width=260)
-                ).add_to(mc)
-
-        st_folium(m, use_container_width=True, height=560, returned_objects=[])
-
-    except Exception as e:
-        st.error(f"Map error: {e}")
-
-with list_col:
-    st.markdown(f"### 📋 Units <small style='color:#6e6c66;font-size:.8rem'>({len(filtered):,} found, showing 250)</small>", unsafe_allow_html=True)
-    if len(filtered) == 0:
-        st.info("No units match the current filters.")
-    else:
-        for _, row in filtered.head(250).iterrows():
-            st.markdown(f"""
-            <div class="unit-card">
-                <div class="unit-title">{row['place'] or 'Industrial Unit'}</div>
-                <div>
-                    <span class="badge badge-pc">{row['PC name']}</span>
-                    <span class="badge badge-party">{row.get('Winner Party','NA')}</span>
-                </div>
-                <div class="unit-meta" style="margin-top:8px;">
-                    📍 {row['District Name']} | {row['State name']}<br>
-                    👷 {row['employees']} employees &nbsp;|&nbsp; 🌐 {row['latitude']:.4f}, {row['longitude']:.4f}
-                </div>
-            </div>""", unsafe_allow_html=True)
-
-st.divider()
-
-with st.expander("📊 PC-wise Summary Table", expanded=False):
-    summary = (
-        filtered.groupby(['State name','District Name','PC name','Winner Party'])
-        .agg(Units=('unit_id','count'), Total_Employees=('employees','sum'))
-        .reset_index().sort_values('Units', ascending=False)
-    )
-    st.dataframe(summary, use_container_width=True, hide_index=True)
-    st.download_button("⬇ Download CSV", summary.to_csv(index=False).encode(), "pc_summary.csv", "text/csv")
-
-with st.expander("📥 Download filtered units", expanded=False):
-    st.info(f"{len(filtered):,} units match current filters.")
-    st.download_button("⬇ Download CSV", filtered.to_csv(index=False).encode(), "filtered_units.csv", "text/csv")
+radius_
