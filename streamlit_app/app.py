@@ -263,5 +263,4 @@ if radius_center.strip():
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 
 _n          = len(filt)
-total_units = int(filt['units'].sum())
-total_em
+total_units = int(filt["units"].sum()) if _n el
